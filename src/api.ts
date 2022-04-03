@@ -1,5 +1,5 @@
 export const BOARD_COLUMNS = 9;
-export const BOARD_ROWS = 8;
+export const BOARD_ROWS = 10;
 
 export enum PieceKind {
     _Unknown = -8,
@@ -19,6 +19,32 @@ export enum PieceKind {
     Cannon = 6,
     Pawn = 7,
     Unknown = 8,
+}
+
+export interface Position {
+    row: number; // 0 based index, bottom to up, with red in the bottom
+    column: number; // 0 based index, right to left, with red in the bottom
+}
+
+export type Board = PieceKind[]; // 8x9
+
+// visible state to player
+// the board are rotated for the black side so the self side is always on the bottom
+export interface State {
+    isRed: boolean;
+    pieces: { kind: PieceKind; pos: Position }[];
+    deads: PieceKind[];
+}
+
+// the board is in the direction that the red side is on the bottom
+export interface Session {
+    init: Board; // initial placement
+
+    board: Board; // current board
+    deads: {
+        kind: PieceKind;
+        visible: boolean;
+    }[];
 }
 
 export const PIECE_CHARACTERS: Record<PieceKind, string> = {
@@ -154,30 +180,105 @@ export const ACT_PIECE = [
     ],
 ];
 
-export interface Position {
-    row: number; // 0 based index, bottom to up, with red in the bottom
-    column: number; // 0 based index, right to left, with red in the bottom
-}
-
-export type Board = PieceKind[][]; // 8x9
-
-export interface State {
-    pieces: { kind: PieceKind; pos: Position }[];
-    deads: PieceKind[];
+export function BoardIndex(row: number, column: number): number {
+    return row * BOARD_COLUMNS + column;
 }
 
 export function RenderBoard(state: State): Board {
-    const ret: Board = [];
-
-    for (let r = 0; r < BOARD_ROWS; ++r) {
-        ret.push(new Array(BOARD_COLUMNS));
-    }
+    const ret: Board = new Array(BOARD_ROWS * BOARD_COLUMNS);
 
     for (let p of state.pieces) {
-        ret[p.pos.row]![p.pos.column] = p.kind;
+        ret[BoardIndex(p.pos.row, p.pos.column)] = p.kind;
     }
 
     return ret;
+}
+
+export function InitSession(): Session {
+    function shuffle<T>(arr: Array<T>) {
+        for (let i = arr.length - 1; i > 0; --i) {
+            const j = Math.floor(Math.random() * i);
+            const t = arr[i]!;
+            arr[i] = arr[j]!;
+            arr[j] = t;
+        }
+    }
+
+    const PIECES: PieceKind[] = [
+        PieceKind.Rook,
+        PieceKind.Knight,
+        PieceKind.Elephant,
+        PieceKind.Mandarin,
+        PieceKind.Mandarin,
+        PieceKind.Elephant,
+        PieceKind.Knight,
+        PieceKind.Rook,
+        PieceKind.Cannon,
+        PieceKind.Cannon,
+        PieceKind.Pawn,
+        PieceKind.Pawn,
+        PieceKind.Pawn,
+        PieceKind.Pawn,
+        PieceKind.Pawn,
+    ];
+
+    const RED_POS: Position[] = [
+        { row: 0, column: 0 },
+        { row: 0, column: 1 },
+        { row: 0, column: 2 },
+        { row: 0, column: 3 },
+        { row: 0, column: 5 },
+        { row: 0, column: 6 },
+        { row: 0, column: 7 },
+        { row: 0, column: 8 },
+        { row: 2, column: 1 },
+        { row: 2, column: 7 },
+        { row: 3, column: 0 },
+        { row: 3, column: 2 },
+        { row: 3, column: 4 },
+        { row: 3, column: 6 },
+        { row: 3, column: 8 },
+    ];
+
+    const BLACK_POS: Position[] = [
+        { row: 9, column: 0 },
+        { row: 9, column: 1 },
+        { row: 9, column: 2 },
+        { row: 9, column: 3 },
+        { row: 9, column: 5 },
+        { row: 9, column: 6 },
+        { row: 9, column: 7 },
+        { row: 9, column: 8 },
+        { row: 7, column: 1 },
+        { row: 7, column: 7 },
+        { row: 7, column: 0 },
+        { row: 6, column: 2 },
+        { row: 6, column: 4 },
+        { row: 6, column: 6 },
+        { row: 6, column: 8 },
+    ];
+
+    shuffle(RED_POS);
+    shuffle(BLACK_POS);
+
+    const init = new Array<PieceKind>(BOARD_ROWS * BOARD_COLUMNS);
+    init.fill(PieceKind.Empty);
+
+    for (let i = 0; i < PIECES.length; ++i) {
+        init[BoardIndex(RED_POS[i]!.row, RED_POS[i]!.column)] = PIECES[i]!;
+        init[BoardIndex(BLACK_POS[i]!.row, BLACK_POS[i]!.column)] = -PIECES[i]!;
+    }
+
+    init[BoardIndex(0, 4)] = PieceKind.King;
+    init[BoardIndex(BOARD_ROWS - 1, 4)] = -PieceKind.King;
+
+    const board = init.slice();
+
+    return {
+        init,
+        board,
+        deads: [],
+    };
 }
 
 export function AvailableMovement(state: State | Board, pos: Position): Position[] {
@@ -186,7 +287,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
     }
 
     const board = !Array.isArray(state) ? RenderBoard(state) : state;
-    const piece = board[pos.row]![pos.column]!;
+    const piece = board[BoardIndex(pos.row, pos.column)]!;
 
     const ret: Position[] = [];
     const pushRetIfSuitable = (row: number, column: number) => {
@@ -195,7 +296,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             row < BOARD_ROWS &&
             column >= 0 &&
             column < BOARD_COLUMNS &&
-            (piece < 0 ? board[row]![column]! >= 0 : board[row]![column]! <= 0)
+            (piece < 0 ? board[BoardIndex(row, column)]! >= 0 : board[BoardIndex(row, column)]! <= 0)
         ) {
             ret.push({
                 row,
@@ -215,7 +316,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             for (let row = pos.row + 1; row < BOARD_ROWS; ++row) {
                 pushRetIfSuitable(row, pos.column);
 
-                if (board[row]![pos.column]! != PieceKind.Empty) {
+                if (board[BoardIndex(row, pos.column)]! != PieceKind.Empty) {
                     break;
                 }
             }
@@ -224,7 +325,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             for (let row = pos.row - 1; row >= 0; --row) {
                 pushRetIfSuitable(row, pos.column);
 
-                if (board[row]![pos.column]! != PieceKind.Empty) {
+                if (board[BoardIndex(row, pos.column)]! != PieceKind.Empty) {
                     break;
                 }
             }
@@ -233,7 +334,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             for (let column = pos.column + 1; column < BOARD_ROWS; ++column) {
                 pushRetIfSuitable(pos.row, column);
 
-                if (board[pos.row]![column]! != PieceKind.Empty) {
+                if (board[BoardIndex(pos.row, column)]! != PieceKind.Empty) {
                     break;
                 }
             }
@@ -242,7 +343,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             for (let column = pos.column - 1; column >= 0; --column) {
                 pushRetIfSuitable(pos.row, column);
 
-                if (board[pos.row]![column]! != PieceKind.Empty) {
+                if (board[BoardIndex(pos.row, column)]! != PieceKind.Empty) {
                     break;
                 }
             }
@@ -288,7 +389,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
                     continue;
                 }
 
-                if (board[blockRow]![blockColumn]! != PieceKind.Empty) {
+                if (board[BoardIndex(blockRow, blockColumn)]! != PieceKind.Empty) {
                     continue;
                 }
 
@@ -328,7 +429,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
                     continue;
                 }
 
-                if (board[blockRow]![blockColumn]! != PieceKind.Empty) {
+                if (board[BoardIndex(blockRow, blockColumn)]! != PieceKind.Empty) {
                     continue;
                 }
 
@@ -374,7 +475,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
                     if (row >= BOARD_ROWS - 3 && column >= BOARD_COLUMNS - 6 && column < BOARD_COLUMNS - 3) {
                         let foundOtherSideKing = false;
                         for (let r = 0; r < BOARD_ROWS; ++r) {
-                            if (board[r]![column]! == PieceKind.King) {
+                            if (board[BoardIndex(r, column)]! == PieceKind.King) {
                                 foundOtherSideKing = true;
                                 break;
                             }
@@ -388,7 +489,7 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
                     if (row < 3 && column >= BOARD_COLUMNS - 6 && column < BOARD_COLUMNS - 3) {
                         let foundOtherSideKing = false;
                         for (let r = 0; r < BOARD_ROWS; ++r) {
-                            if (board[r]![column]! == PieceKind._King) {
+                            if (board[BoardIndex(r, column)]! == PieceKind._King) {
                                 foundOtherSideKing = true;
                                 break;
                             }
@@ -408,14 +509,16 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             let jump = false;
             for (let row = pos.row + 1; row < BOARD_ROWS; ++row) {
                 if (jump) {
-                    if (piece < 0 ? board[row]![pos.column]! >= 0 : board[row]![pos.column]! <= 0) {
+                    if (
+                        piece < 0 ? board[BoardIndex(row, pos.column)]! >= 0 : board[BoardIndex(row, pos.column)]! <= 0
+                    ) {
                         pushRetIfSuitable(row, pos.column);
                         break;
-                    } else if (board[row]![pos.column]! != PieceKind.Empty) {
+                    } else if (board[BoardIndex(row, pos.column)]! != PieceKind.Empty) {
                         break;
                     }
                 } else {
-                    if (board[row]![pos.column]! == PieceKind.Empty) {
+                    if (board[BoardIndex(row, pos.column)]! == PieceKind.Empty) {
                         pushRetIfSuitable(row, pos.column);
                     } else {
                         jump = true;
@@ -427,14 +530,16 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             jump = false;
             for (let row = pos.row - 1; row >= 0; --row) {
                 if (jump) {
-                    if (piece < 0 ? board[row]![pos.column]! >= 0 : board[row]![pos.column]! <= 0) {
+                    if (
+                        piece < 0 ? board[BoardIndex(row, pos.column)]! >= 0 : board[BoardIndex(row, pos.column)]! <= 0
+                    ) {
                         pushRetIfSuitable(row, pos.column);
                         break;
-                    } else if (board[row]![pos.column]! != PieceKind.Empty) {
+                    } else if (board[BoardIndex(row, pos.column)]! != PieceKind.Empty) {
                         break;
                     }
                 } else {
-                    if (board[row]![pos.column]! == PieceKind.Empty) {
+                    if (board[BoardIndex(row, pos.column)]! == PieceKind.Empty) {
                         pushRetIfSuitable(row, pos.column);
                     } else {
                         jump = true;
@@ -446,14 +551,16 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             jump = false;
             for (let column = pos.column + 1; column < BOARD_COLUMNS; ++column) {
                 if (jump) {
-                    if (piece < 0 ? board[pos.row]![column]! >= 0 : board[pos.row]![column]! <= 0) {
+                    if (
+                        piece < 0 ? board[BoardIndex(pos.row, column)]! >= 0 : board[BoardIndex(pos.row, column)]! <= 0
+                    ) {
                         pushRetIfSuitable(pos.row, column);
                         break;
-                    } else if (board[pos.row]![column]! != PieceKind.Empty) {
+                    } else if (board[BoardIndex(pos.row, column)]! != PieceKind.Empty) {
                         break;
                     }
                 } else {
-                    if (board[pos.row]![column]! == PieceKind.Empty) {
+                    if (board[BoardIndex(pos.row, column)]! == PieceKind.Empty) {
                         pushRetIfSuitable(pos.row, column);
                     } else {
                         jump = true;
@@ -465,14 +572,16 @@ export function AvailableMovement(state: State | Board, pos: Position): Position
             jump = false;
             for (let column = pos.column - 1; column >= 0; --column) {
                 if (jump) {
-                    if (piece < 0 ? board[pos.row]![column]! >= 0 : board[pos.row]![column]! <= 0) {
+                    if (
+                        piece < 0 ? board[BoardIndex(pos.row, column)]! >= 0 : board[BoardIndex(pos.row, column)]! <= 0
+                    ) {
                         pushRetIfSuitable(pos.row, column);
                         break;
-                    } else if (board[pos.row]![column]! != PieceKind.Empty) {
+                    } else if (board[BoardIndex(pos.row, column)]! != PieceKind.Empty) {
                         break;
                     }
                 } else {
-                    if (board[pos.row]![column]! == PieceKind.Empty) {
+                    if (board[BoardIndex(pos.row, column)]! == PieceKind.Empty) {
                         pushRetIfSuitable(pos.row, column);
                     } else {
                         jump = true;
